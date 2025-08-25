@@ -29,4 +29,8 @@ Wikipedia-API==0.5.8
 WTForms==3.0.1
 gunicorn
 tensorflow
+opencv-python
+tensorflow-hub
+numpy
+
 
