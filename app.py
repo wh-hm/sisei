@@ -88,4 +88,5 @@ def analyze():
     return jsonify({"result": img_str, "score": score})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # ローカルで直接実行する場合のみ
+    app.run(debug=True, host="0.0.0.0", port=8000)
