@@ -28,5 +28,5 @@ Werkzeug==2.3.8
 Wikipedia-API==0.5.8
 WTForms==3.0.1
 gunicorn
-tensorflow==2.14.0
+tensorflow
 
