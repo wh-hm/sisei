@@ -63,7 +63,7 @@ def draw_golden_line_auto(image, keypoints):
 
 @app.route("/")
 def home():
-    return "Hello, Flask!"
+    return render_template("index.html")
 
 
 
