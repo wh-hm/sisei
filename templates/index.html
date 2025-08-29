@@ -1,67 +1,358 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>ポーズ判定</title>
-<style>
-#container { display: flex; gap: 20px; }
-#videoElement { border: 1px solid #ccc; }
-#resultImg { border: 1px solid #ccc; }
-</style>
+  <meta charset="UTF-8">
+  <title>姿勢解析アプリ</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  
 </head>
 <body>
+  <h1>ゴールデンライン解析アプリ</h1>
 
-<h2>ライブカメラ or 画像アップロードで解析</h2>
-<div id="container">
-    <div>
-        <video id="videoElement" width="320" height="240" autoplay></video>
-        <br>
-        <button onclick="captureFromCamera()">ライブ取得</button>
-        <br><br>
-        <input type="file" id="uploadImage" accept="image/*">
-        <button onclick="analyzeUpload()">静止画解析</button>
+  <h2>解析モードを選んでください</h2>
+  <div id="mode_div">
+    <label><input type="radio" name="mode" value="upload" checked onchange="switchMode()">画像アップロード</label>
+    <label><input type="radio" name="mode" value="live" onchange="switchMode()">ライブカメラ</label>
+  </div>
+
+  <!-- アップロードモード -->
+  <div id="container_img">
+    <div id="uploadContainer">
+      <input type="file" id="imageInput" accept="image/*"><br>
+      <img id="preview" src="#" alt="プレビュー" style="display:none;">
     </div>
-    <div>
-        <img id="resultImg" width="320" height="240">
-        <p id="scoreText"></p>
+    <div class="col2">
+      <img id="resultImage" src="#" alt="解析結果" style="display:none;">
+      <div class="col">
+        <p id="hanntei"></p>
+        <table style="display: none;" id="tableScore">
+          <tr><th>姿勢スコア:</th><td id="scoreText"></td></tr>
+          <tr><th>最もすれている部分:</th><td id="worstPartText"></td></tr>
+          <tr><th>コメント:</th><td id="commentText" class="text_left"></td></tr>
+        </table>
+      </div>
     </div>
-</div>
+    <p id="missingText" class="text_left"></p>
+  </div>
 
-<script>
-const video = document.getElementById('videoElement');
-navigator.mediaDevices.getUserMedia({video: true})
-.then(stream => { video.srcObject = stream; })
-.catch(err => { console.error(err); });
+  <!-- ライブモード -->
+  <div id="container_live" style="display:none;">
+    <p>ライブ解析中...</p>
+    <div id="video_div"><video id="video" width="320" height="240" autoplay playsinline></video></div>
+    
 
-function captureFromCamera(){
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
-    sendImage(canvas.toDataURL());
-}
+    
+    <div class="col2">
+        
+      <div id="canvas_div"><canvas id="canvas" width="640" height="480" style="display: none;"></canvas></div>
+      <div class="col">
+        <p id="hanntei_live"></p>
+        <table style="display: none;" id="tableScore_live">
+          <tr><th>姿勢スコア:</th><td id="scoreText_live"></td></tr>
+          <tr><th>最もすれている部分:</th><td id="worstPartText_live"></td></tr>
+          <tr><th>コメント:</th><td id="commentText_live" class="text_left"></td></tr>
+        </table>
+      </div>
+    </div>
+    <p id="missingText_live" class="text_left"></p>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
 
-function analyzeUpload(){
-    const file = document.getElementById('uploadImage').files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = e => sendImage(e.target.result);
-    reader.readAsDataURL(file);
-}
+  <script>
+    let detector;
+    let video, canvas, ctx;
+    let liveInterval = null;
 
-function sendImage(imgData){
-    fetch("/analyze", {
-        method:"POST",
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({image: imgData})
-    })
-    .then(res => res.json())
-    .then(data => {
-        document.getElementById('resultImg').src = data.result;
-        document.getElementById('scoreText').innerText = "ゴールデンラインスコア: " + data.score.toFixed(1) + "%";
+    window.onload = () => {
+        
+      video = document.getElementById("video");
+      canvas = document.getElementById("canvas");
+      ctx = canvas.getContext("2d");
+
+    //   setupCamera().then(() => {
+    //     loadModel().then(() => {
+    //       renderLoop();
+    //     });
+    //   });
+
+      document.getElementById("imageInput").addEventListener("change", handleUpload);
+      switchMode();
+    };
+
+let liveActive = true;
+
+function switchMode() {
+    console.log("canvas display:", canvas.style.display);
+
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  const isUpload = mode === "upload";
+
+  // UI切り替え
+  document.getElementById("container_img").style.display = isUpload ? "block" : "none";
+  document.getElementById("container_live").style.display = isUpload ? "none" : "block";
+  document.getElementById("video").style.display = isUpload ? "none" : "block";
+  document.getElementById("tableScore_live").style.display = "none";
+
+  liveActive = !isUpload;
+
+  if (isUpload) {
+
+    
+    // ✅ カメラ完全停止（ライトも消える）
+    if (video.srcObject) {
+        document.getElementById("canvas").style.display = "none";
+        document.getElementById("canvas_div").style.display = "none";
+      video.srcObject.getTracks().forEach(track => {
+        if (track.readyState === "live") {
+          track.stop();
+        }
+      });
+      video.srcObject = null;
+    }
+
+    // ✅ 描画ループ停止
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+      animationId = null;
+    }
+
+    // ✅ UI初期化（任意）
+    document.getElementById("hanntei_live").innerText = "";
+    document.getElementById("missingText_live").innerText = "";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  } else {
+    // ✅ カメラ起動 & モデル読み込み & 描画開始
+    setupCamera().then(() => {
+      loadModel().then(() => {
+        renderLoop();
+      });
     });
+  }
 }
-</script>
 
+
+
+
+
+    function analyzeLivePose(keypoints) {
+        const threshold = 0.3;
+        const missing = keypoints.filter(kp => kp.score < threshold).map(kp => kp.name);
+        const visibleKeypoints = keypoints.filter(kp => kp.score >= threshold);
+
+        // スコア算出（例：検出できた部位の割合）
+        const score = (visibleKeypoints.length / keypoints.length) * 100;
+
+        // ズレ部位（例：左右の肩のx座標差が大きい場合）
+        let worstPart = "なし";
+        let comment = "姿勢は良好です";
+
+        const leftShoulder = keypoints.find(k => k.name === "left_shoulder");
+        const rightShoulder = keypoints.find(k => k.name === "right_shoulder");
+
+        if (leftShoulder?.score > threshold && rightShoulder?.score > threshold) {
+            const dx = Math.abs(leftShoulder.x - rightShoulder.x);
+            if (dx > 80) {
+            worstPart = "肩の左右差";
+            comment = "肩の位置が大きくズレています";
+            }
+        }
+
+        // UIに反映
+        document.getElementById("scoreText_live").innerText = score.toFixed(1) + "%";
+        document.getElementById("worstPartText_live").innerText = worstPart;
+        document.getElementById("commentText_live").innerText = comment;
+        document.getElementById("tableScore_live").style.display = "table";
+
+        // 判定文（Golden Lineとの整合性などに応じて）
+        document.getElementById("hanntei").innerText = score >= 95 ? "理想的な姿勢です ✅" : "姿勢に改善の余地があります ❌";
+
+        // missing部位表示
+        document.getElementById("missingText_live").innerText = missing.length > 0
+            ? `⚠️ 検出できない部位: ${missing.join("、")}`
+            : "";
+        }
+
+
+    async function setupCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      video.srcObject = stream;
+      return new Promise(resolve => {
+        video.onloadedmetadata = () => resolve();
+      });
+    }
+
+    async function loadModel() {
+      detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+        modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+      });
+    }
+
+    // async function renderLoop() {
+    //   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    //   const poses = await detector.estimatePoses(video);
+    //   if (poses.length > 0) {
+    //     const keypoints = poses[0].keypoints;
+    //     drawKeypoints(keypoints);
+    //     drawGoldenLine(keypoints);
+    //     analyzeLivePose(keypoints);  // ← ここでUIに反映
+
+    //   }
+    //   requestAnimationFrame(renderLoop);
+    // }
+
+    let lastSentTime = 0;
+
+let animationId = null;
+
+function renderLoop() {
+  if (!liveActive) {
+    const mode = document.querySelector('input[name="mode"]:checked').value;
+    const isUpload = mode === "upload";
+
+    document.getElementById("container_img").style.display = isUpload ? "block" : "none";
+    document.getElementById("container_live").style.display = isUpload ? "none" : "block";
+    document.getElementById("video").style.display = isUpload ? "none" : "block";
+    document.getElementById("tableScore_live").style.display = "none";
+    return;
+  }
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  detector.estimatePoses(video).then(poses => {
+    if (poses.length > 0) {
+      const keypoints = poses[0].keypoints;
+      drawKeypoints(keypoints);
+      drawGoldenLine(keypoints);
+
+      const now = Date.now();
+      if (now - lastSentTime > 1500) {
+        lastSentTime = now;
+
+        const imageData = canvas.toDataURL("image/png");
+
+        // ✅ toDataURL の後に非表示
+        //canvas.style.display = "none";
+
+        sendLiveImage(imageData);
+      }
+    }
+    animationId = requestAnimationFrame(renderLoop);
+  });
+}
+
+function sendLiveImage(imageSrc) {
+  if (!liveActive) return;
+
+  fetch("/analyze", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ image: imageSrc })
+  })
+  .then(response => response.json())
+  .then(data => {
+    if (!liveActive) return;
+
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // ✅ 表示を戻す
+      canvas.style.display = "block";
+      document.getElementById("canvas_div").style.display = "block";
+    };
+    img.onerror = () => {
+      canvas.style.display = "block";
+      document.getElementById("canvas_div").style.display = "block";
+    };
+    img.src = data.result;
+
+    document.getElementById("video").style.display = "none";
+    document.getElementById("hanntei").style.display = "none";
+    document.getElementById("hanntei_live").innerText = data.hanntei;
+    document.getElementById("container_img").style.display = "none";
+    document.getElementById("resultImage").style.display = "none";
+    document.getElementById("scoreText_live").innerText = data.score === "不明" ? "不明" : data.score.toFixed(1) + "%";
+    document.getElementById("commentText_live").innerText = data.comment;
+    document.getElementById("worstPartText_live").innerText = data.worst_part;
+    document.getElementById("missingText").style.display = "none";
+    document.getElementById("missingText_live").innerText = data.missing;
+    document.getElementById("tableScore_live").style.display = "table";
+  })
+  .catch(error => {
+    console.error("ライブ解析エラー:", error);
+    canvas.style.display = "block";
+    document.getElementById("canvas_div").style.display = "block";
+  });
+}
+
+    function drawKeypoints(keypoints) {
+      keypoints.forEach(kp => {
+        if (kp.score > 0.3) {
+          ctx.beginPath();
+          ctx.arc(kp.x, kp.y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = "red";
+          ctx.fill();
+        }
+      });
+    }
+
+    function drawGoldenLine(keypoints) {
+      const leftEar = keypoints.find(k => k.name === "left_ear");
+      const rightEar = keypoints.find(k => k.name === "right_ear");
+      const baseEar = leftEar?.score > 0.3 ? leftEar : rightEar?.score > 0.3 ? rightEar : null;
+      if (baseEar) {
+        ctx.strokeStyle = "yellow";
+        ctx.beginPath();
+        ctx.moveTo(baseEar.x, 0);
+        ctx.lineTo(baseEar.x, canvas.height);
+        ctx.stroke();
+      }
+    }
+
+    function handleUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const imageData = e.target.result;
+        document.getElementById("preview").src = imageData;
+        document.getElementById("preview").style.display = "block";
+        sendImage(imageData);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function sendImage(imageSrc) {
+      fetch("/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: imageSrc })
+      })
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById("preview").style.display = "none";
+        document.getElementById("container_live").style.display = "none";
+        document.getElementById("resultImage").src = data.result;
+        document.getElementById("resultImage").style.display = "block";
+        document.getElementById("hanntei").innerText = data.hanntei;
+        document.getElementById("scoreText").innerText = data.score === "不明" ? "不明" : data.score.toFixed(1) + "%";
+        document.getElementById("commentText").innerText = data.comment;
+        document.getElementById("worstPartText").innerText = data.worst_part;
+        document.getElementById("missingText").style.display = "block";
+        document.getElementById("missingText").innerText = data.missing;
+        document.getElementById("tableScore").style.display = "block";
+        
+      })
+      .catch(error => {
+        console.error("解析エラー:", error);
+        alert("解析中にエラーが発生しました。");
+      });
+    }
+
+
+  </script>
 </body>
 </html>
