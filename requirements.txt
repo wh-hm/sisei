@@ -22,7 +22,7 @@ PyJWT==2.10.1
 requests==2.31.0
 SQLAlchemy==2.0.15
 tomli==2.2.1
-typing_extensions==4.13.2
+typing_extensions
 urllib3==2.5.0
 Werkzeug==2.3.8
 Wikipedia-API==0.5.8
@@ -32,6 +32,7 @@ opencv-python
 numpy
 tensorflow==2.13.0
 tensorflow_hub==0.13.0
+
 
 
 
