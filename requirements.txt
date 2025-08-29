@@ -28,9 +28,12 @@ Werkzeug==2.3.8
 Wikipedia-API==0.5.8
 WTForms==3.0.1
 gunicorn
-tensorflow
 opencv-python
-tensorflow-hub
 numpy
+tensorflow==2.13.0
+tensorflow_hub==0.13.0
+tf_keras==0.5.0
+
+
 
 
